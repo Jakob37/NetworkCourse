@@ -1,0 +1,166 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+# Load and filter the data
+
+```{r}
+
+library(tidyverse)
+
+rna_df <- read_tsv("rna_tissue_wide.tsv", na="0") %>% data.frame()
+
+rna_sdf <- rna_df[, -c(1,2,3)]
+rownames(rna_sdf) <- rna_df$Gene
+head(rna_sdf)
+
+non_na_thres <- 10
+row_na_counts <- rowSums(is.na(rna_sdf))
+
+row_na_counts
+
+rna_sdf_filter <- rna_sdf[row_na_counts < non_na_thres, ]
+message("Before filter: ", nrow(rna_sdf), " after filter: ", nrow(rna_sdf_filter))
+
+```
+
+
+# Calculate correlations and network
+
+```{r}
+# corr_mat <- cor(t(rna_sdf), method="spearman")
+
+library(Hmisc)
+mycor <- rcorr(t(head(rna_sdf, 20)), type="spearman")
+mycor$P
+
+library(reshape2)
+long_df <- melt(mycor$P)
+long_df_filter <- long_df %>% filter(value < 0.0000001)
+```
+
+# Try reading into network
+
+```{r}
+long_df <- read_tsv("p_long_p0000001.tsv.gz")
+head(long_df)
+
+library(igraph)
+
+nrow(long_df)
+
+use_count <- 2000000
+graph_from_data_frame(head(long_df, use_count))
+```
+
+# Calculating out-degree correlation
+
+1. Load transcript correlation matrix
+2. Load protein interaction matrix
+3. Perform out-degree calculations
+4. Extract out-degree vectors linked to gene IDs
+5. Extract common gene IDs
+6. Calculate the correlation
+
+Packages
+
+```{r}
+library(igraph)
+library(tidyverse)
+library(gridExtra)
+```
+
+Load data
+
+```{r}
+trans_corr <- read_tsv("p_long_p0001.tsv.gz")
+# trans_corr <- read_tsv("p_long_p0000001.tsv.gz")
+prot_int <- read_tsv("ppi_human_stringdb_ensp2ensg2.tab.gz")
+use_count <- Inf
+
+message("Transcript entries: ", nrow(trans_corr))
+message("Prot entries: ", nrow(prot_int))
+
+message("Transcripts per prot: ", nrow(trans_corr) / nrow(prot_int))
+```
+
+Generate graphs
+
+```{r}
+thresholds <- c(1e-3, 1e-4, 1e-5)
+# thresholds <- c(1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11, 1e-12)
+
+prot_graph <- graph_from_data_frame(head(prot_int[, c("gene1", "gene2")], use_count))
+prot_deg <- igraph::degree(prot_graph, mode="out")
+
+plts <- list()
+corrs <- list()
+
+for (i in seq_len(length(thresholds))) {
+    thres <- thresholds[i]
+    message("Processing threshold: ", thres)
+    
+    subset_trans <- trans_corr %>% filter(value < thres)
+    trans_graph <- graph_from_data_frame(head(trans_corr, use_count))
+    trans_deg <- igraph::degree(trans_graph, mode="out")
+    common_names <- intersect(names(trans_deg), names(prot_deg))
+    common_trans_out <- trans_deg[common_names]
+    common_prot_out <- prot_deg[common_names]
+    out_deg_df <- data.frame(
+        trans=common_trans_out,
+        prot=common_prot_out
+    )
+    
+    plts[[i]] <- grid.arrange(
+        ggplot(out_deg_df, aes(x=trans)) + geom_histogram(bins=100) + theme_classic() + xlim(NA, 2000),
+        ggplot(out_deg_df, aes(x=prot)) + geom_histogram(bins=100) + theme_classic() + xlim(NA, 2000)
+    )
+
+    message(cor(out_deg_df$trans, out_deg_df$prot, method="pearson"))
+    message(cor(out_deg_df$trans, out_deg_df$prot, method="spearman"))
+    
+    message(cor.test(out_deg_df$trans, out_deg_df$prot, method="pearson"))
+    message(cor.test(out_deg_df$trans, out_deg_df$prot, method="spearman"))
+    
+}
+
+
+
+
+
+head(trans_deg)
+head(prot_deg)
+
+```
+
+Next steps: Calculating correlation of out degree
+
+(Possibly also do some differential thresholding?)
+
+```{r}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
